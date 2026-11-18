@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>游戏诊断页</title>
+<style>
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#f2f6fb;margin:0;padding:16px;color:#2b3a55;}
+.box{background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);}
+h3{margin:0 0 8px;font-size:16px;}
+td{padding:4px 6px;font-size:14px;vertical-align:top;}
+.ok{color:#1e8e4e;font-weight:bold;}.bad{color:#c0392b;font-weight:bold;}
+pre{white-space:pre-wrap;word-break:break-all;font-size:12px;background:#f7f9fc;border-radius:8px;padding:8px;}
+</style>
+</head>
+<body>
+<div class="box"><h3>🔍 游戏打不开诊断</h3>
+<table id="r"></table>
+</div>
+<div class="box"><h3>错误信息</h3><pre id="e">（无）</pre></div>
+<div class="box" id="big" style="display:none"><h3>大页面脚本测试</h3><pre id="b2"></pre></div>
+<script>
+window.__errs = [];
+window.onerror = function(msg, src, line, col){ window.__errs.push(msg + ' @' + line + ':' + col); document.getElementById('e').textContent = window.__errs.join('\n'); return false; };
+var rows = [];
+function add(k, v, ok){ rows.push('<tr><td>' + k + '</td><td class="' + (ok ? 'ok' : 'bad') + '">' + v + '</td></tr>'); }
+try {
+  var ua = navigator.userAgent;
+  var wx = /MicroMessenger/i.test(ua);
+  var ios = /iPhone|iPad/i.test(ua);
+  var ls = '无法使用';
+  try { localStorage.setItem('__t','1'); ls = localStorage.getItem('__t') === '1' ? '正常' : '读写失败'; } catch(e){ ls = '被禁用(' + (e.message||e.name).slice(0,40) + ')'; }
+  add('微信内打开', wx ? '是' : '否', true);
+  add('系统', ios ? 'iOS/苹果' : '安卓或其他', true);
+  add('JavaScript', '正常执行 ✓', true);
+  add('localStorage(进度记忆)', ls, ls === '正常');
+  add('screen', window.innerWidth + 'x' + window.innerHeight, true);
+  document.getElementById('r').innerHTML = rows.join('');
+  document.getElementById('e').textContent = window.__errs.length ? window.__errs.join('\n') : '（无报错）';
+  /* 大页面拉取测试：取一个真实游戏页的纯脚本执行检测 */
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', 'g4u6.html?cb=' + Date.now(), true);
+  xhr.onload = function(){
+    var len = xhr.status === 200 ? xhr.responseText.length : 0;
+    var hasEngine = len > 0 && xhr.responseText.indexOf('refreshStars') >= 0;
+    var lines = [];
+    lines.push('HTTP 状态: ' + xhr.status);
+    lines.push('内容大小: ' + Math.round(len / 1024) + ' KB');
+    lines.push('游戏引擎代码完整: ' + (hasEngine ? '是' : '否'));
+    document.getElementById('big').style.display = '';
+    document.getElementById('b2').textContent = lines.join('\n');
+  };
+  xhr.onerror = function(){ document.getElementById('big').style.display=''; document.getElementById('b2').textContent = '大页面拉取失败（网络被拦）'; };
+  xhr.send();
+} catch(e){
+  document.getElementById('e').textContent = '诊断脚本错误: ' + (e.message || e);
+}
+</script>
+</body>
+</html>
