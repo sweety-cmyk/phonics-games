@@ -369,7 +369,1382 @@
 
 <script id="audio-data">var AUDIO={};</script>
 <script>
-/*__GAME_CORE__*/
+/* ================= 四上 U2 · 朋友大冒险 V3 =================
+   五大板块 · 14 关（单词3 / 句型3 / 对话2 / 语法3 / 阅读3）
+   难度：⭐简单 ⭐⭐中等 ⭐⭐⭐挑战
+   阅读文章加长到 6-8 句，题目同步升级
+   门禁：加微信 → 4 位通关暗号（V3 新暗号 3721，旧暗号作废）*/
+
+var window = window;
+
+/* ================= 语音播放（原声 mp3，失败退浏览器朗读） ================= */
+var FB_VOICE = null;
+try{
+  var vs = speechSynthesis.getVoices();
+  for(var vi=0; vi<vs.length; vi++){ if(/en[-_]/i.test(vs[vi].lang)) { FB_VOICE = vs[vi]; break; } }
+  speechSynthesis.onvoiceschanged = function(){ FB_VOICE = pickVoice(); };
+}catch(e){}
+function pickVoice(){
+  try{
+    var vs = speechSynthesis.getVoices();
+    for(var i=0;i<vs.length;i++){ if(/en[-_]/i.test(vs[i].lang)) return vs[i]; }
+  }catch(e){}
+  return null;
+}
+function ttsSay(text, cb){
+  try{
+    if(!window.speechSynthesis){ if(cb) cb(); return; }
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-US'; u.rate = 0.85;
+    if(FB_VOICE) u.voice = FB_VOICE;
+    if(cb) u.onend = cb;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }catch(e){ if(cb) cb(); }
+}
+var CUR_AUDIO = null, CUR_CB = null, SAY_SEQ = 0;
+function stopSay(){
+  CUR_CB = null;
+  if(CUR_AUDIO){
+    try{ CUR_AUDIO.pause(); CUR_AUDIO.currentTime = 0; }catch(e){}
+    CUR_AUDIO = null;
+  }
+  try{ if(window.speechSynthesis) speechSynthesis.cancel(); }catch(e){}
+}
+function fixAudURL(u){
+  if(!u) return u;
+  if(u.indexOf('data:') === 0 || /^https?:\/\//.test(u)) return u;
+  return 'data:audio/mpeg;base64,' + u;
+}
+function say(text, cb){
+  if(!text) { if(cb) cb(); return; }
+  var key = String(text);
+  var url = AUDIO[key] || AUDIO[key.replace(/[.!?]+$/,'')];
+  stopSay();
+  if(!url){ window.__audioMiss.push(key); ttsSay(key, cb); return; }
+  var failed = false;
+  function fail(){ if(failed) return; failed = true; CUR_CB = null; ttsSay(key, cb); }
+  try{
+    var a = new Audio(fixAudURL(url));
+    a.preload = 'auto';
+    a.onerror = fail;
+    a.onended = function(){
+      if(CUR_AUDIO === a && CUR_CB){ var f = CUR_CB; CUR_CB = null; f(); }
+    };
+    CUR_AUDIO = a; CUR_CB = cb || null;
+    var p = a.play();
+    if(p && p.catch){ p.catch(fail); }
+  }catch(e){ fail(); }
+}
+function sayThen(text, fn, fallbackMs){
+  var my = ++SAY_SEQ, fired = false;
+  function fire(){ if(fired || my !== SAY_SEQ) return; fired = true; fn(); }
+  say(text, fire);
+  setTimeout(fire, fallbackMs || 6000);
+}
+function unlockAudio(){
+  try{
+    var a = new Audio(fixAudURL(AUDIO['job'] || ''));
+    a.volume = 0;
+    var p = a.play();
+    if(p && p.then){ p.then(function(){ a.pause(); }).catch(function(){}); }
+  }catch(e){}
+  document.removeEventListener('pointerdown', unlockAudio, true);
+}
+document.addEventListener('pointerdown', unlockAudio, true);
+function fb(msg, ok){
+  var el = document.getElementById('game-fb'); if(!el) return;
+  el.textContent = msg; el.className = 'feedback ' + (ok ? 'fb-good' : 'fb-bad');
+}
+/* 只在音频确实存在时朗读（避免 TTS 兜底阻塞游戏推进） */
+function saySafe(t){ if(t && AUDIO[t]) say(t); }
+function ifActive(id, fn){
+  var c = document.querySelector('.screen.active');
+  if(c && c.id === id) fn();
+}
+function party(n){
+  var layer = document.getElementById('fx');
+  if(!layer) return;
+  var ems = ['⭐','🎉','✨','🎈','💫','🌟'];
+  for(var i=0;i<(n||26);i++){
+    var d = document.createElement('div');
+    d.className = 'fxp';
+    d.textContent = ems[Math.floor(Math.random()*ems.length)];
+    d.style.left = (Math.random()*96) + '%';
+    d.style.fontSize = (14 + Math.random()*18).toFixed(0) + 'px';
+    d.style.animationDuration = (1.5 + Math.random()*1.3).toFixed(2) + 's';
+    d.style.animationDelay = (Math.random()*0.4).toFixed(2) + 's';
+    layer.appendChild(d);
+    (function(el){ setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 3400); })(d);
+  }
+}
+function shuffle(a){
+  for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; }
+  return a;
+}
+
+/* ================= 门禁（与 V1 相同） ================= */
+var WXOK = false;
+function wxOK(){
+  if(WXOK) return true;
+  try{ return localStorage.getItem('g4u2wx3') === '1'; }catch(e){ return false; }
+}
+var WXCODE_HASH = 115603095;   /* 暗号 3721（V3 新暗号，旧的 2618 已作废） */
+function pcHash(s){
+  var h = 0;
+  for(var i=0;i<s.length;i++){ h = (h * 131 + s.charCodeAt(i)) % 2147483647; }
+  return h;
+}
+function wxSubmit(){
+  var inp = document.getElementById('wx-code');
+  var err = document.getElementById('wx-err');
+  var row = inp ? inp.parentNode : null;
+  var v = (inp && inp.value ? inp.value : '').replace(/\D/g, '');
+  if(v.length !== 4){
+    err.textContent = '请输入老师发你的 4 位数字暗号～';
+    err.classList.add('show');
+    if(row){ row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake'); }
+    if(inp) inp.focus();
+    return;
+  }
+  if(pcHash(v) !== WXCODE_HASH){
+    err.textContent = '暗号不对哦～先加老师微信，找老师领暗号';
+    err.classList.add('show');
+    if(row){ row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake'); }
+    if(inp){ inp.value = ''; inp.focus(); }
+    return;
+  }
+  err.classList.remove('show');
+  wxDone();
+}
+(function(){
+  var ci = document.getElementById('wx-code');
+  if(!ci) return;
+  ci.addEventListener('input', function(){ this.value = (this.value || '').replace(/\D/g, '').slice(0,4); });
+  ci.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.keyCode === 13){ wxSubmit(); } });
+})();
+function wxDone(){
+  WXOK = true;
+  try{ localStorage.setItem('g4u2wx3','1'); }catch(e){}
+  go(kidName() ? 'sc-home' : 'sc-name');   /* 第一次进来先问名字 */
+}
+
+/* ================= 名字（奖状上要用） ================= */
+function kidName(){
+  try{ return (localStorage.getItem('g4u2name') || '').trim(); }catch(e){ return ''; }
+}
+function setName(v){
+  v = (v || '').replace(/\s+/g, ' ').trim().slice(0, 12);
+  try{ localStorage.setItem('g4u2name', v); }catch(e){}
+  var c = document.getElementById('cert-name');
+  if(c) c.value = v;
+  paintName();
+  return v;
+}
+function paintName(){
+  var n = kidName();
+  var hi = document.getElementById('home-hi');
+  if(hi){
+    hi.innerHTML = n
+      ? '👋 Hi，<b style="color:#e2703a;">' + n + '</b> 小朋友，今天想闯哪一关？' +
+        ' <button class="say-btn" style="width:auto;padding:4px 10px;font-size:12px;" onclick="editName()">✏️ 改名字</button>'
+      : '';
+  }
+  var c = document.getElementById('cert-name');
+  if(c && n && c.value !== n) c.value = n;
+}
+function nameSubmit(){
+  var inp = document.getElementById('kid-name');
+  var err = document.getElementById('name-err');
+  var v = (inp && inp.value ? inp.value : '').replace(/\s+/g, ' ').trim();
+  if(!v){
+    if(err) err.style.display = 'block';
+    if(inp){ inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake'); inp.focus(); }
+    return;
+  }
+  if(err) err.style.display = 'none';
+  setName(v);
+  go('sc-home');
+}
+function nameLater(){
+  setName(kidName() || '小小闯关者');
+  go('sc-home');
+}
+function editName(){
+  var inp = document.getElementById('kid-name');
+  if(inp) inp.value = kidName();
+  var err = document.getElementById('name-err');
+  if(err) err.style.display = 'none';
+  go('sc-name');
+  if(inp) setTimeout(function(){ inp.focus(); }, 150);
+}
+(function(){
+  var ki = document.getElementById('kid-name');
+  if(ki) ki.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.keyCode === 13){ nameSubmit(); } });
+})();
+
+/* ================= 进度（键随板块/关卡自动生成，键 g4u2prog2） ================= */
+var BOARD_KEYS = [];
+var TOTAL_STARS = 0;
+var P = {};
+function initProg(){
+  BOARD_KEYS = [];
+  BOARDS.forEach(function(b){
+    b.games.forEach(function(_, gi){ BOARD_KEYS.push(b.id + gi); });
+  });
+  TOTAL_STARS = BOARD_KEYS.length;
+  P = {};
+  BOARD_KEYS.forEach(function(k){ P[k] = 0; });
+  try{
+    var raw = localStorage.getItem('g4u2prog2');
+    if(raw){
+      var o = JSON.parse(raw);
+      for (var i = 0; i < BOARD_KEYS.length; i++){ if(o[BOARD_KEYS[i]] === 1) P[BOARD_KEYS[i]] = 1; }
+    }
+  }catch(e){}
+}
+function saveP(){ try{ localStorage.setItem('g4u2prog2', JSON.stringify(P)); }catch(e){} refreshStars(); }
+function totalDone(){
+  var n = 0;
+  for(var k=0;k<BOARD_KEYS.length;k++) n += P[BOARD_KEYS[k]] ? 1 : 0;
+  return n;
+}
+function refreshStars(){
+  var map = document.getElementById('board-map');
+  if(map){
+    var cards = map.querySelectorAll('.stars-mini');
+    for(var i=0;i<cards.length;i++){
+      var bid = cards[i].getAttribute('data-b');
+      var s = '';
+      var cnt = 3;
+      for(var bi=0; bi<BOARDS.length; bi++){ if(BOARDS[bi].id === bid) cnt = BOARDS[bi].games.length; }
+      for(var j=0;j<cnt;j++) s += P[bid+j] ? '⭐' : '☆';
+      cards[i].textContent = s;
+    }
+  }
+  var total = totalDone(), btn = document.getElementById('btn-cert');
+  if(btn){
+    btn.textContent = total >= TOTAL_STARS ? '🏆 领取我的奖状（全部通关 ✅）' : '🏆 领取我的奖状（还差 ' + (TOTAL_STARS-total) + ' 关）';
+  }
+  var st = document.getElementById('st-total');
+  if(st) st.textContent = '⭐'.repeat(total) + '☆'.repeat(TOTAL_STARS - total);
+  var cs = document.getElementById('cert-stars');
+  if(cs) cs.textContent = '⭐'.repeat(total) + '☆'.repeat(TOTAL_STARS - total);
+  paintName();
+}
+function go(id){
+  stopSay();
+  if(id !== 'sc-wx' && !wxOK()) id = 'sc-wx';
+  var ss = document.querySelectorAll('.screen');
+  for(var i=0;i<ss.length;i++) ss[i].classList.remove('active');
+  var el = document.getElementById(id);
+  if(el) el.classList.add('active');
+  window.scrollTo(0,0);
+  refreshStars();
+}
+if(document.getElementById('js-warn')) document.getElementById('js-warn').style.display = 'none';
+
+var WORDS = [
+  {w:'strong', zh:'强壮的', em:'💪'},
+  {w:'hair', zh:'头发', em:'👦'},
+  {w:'kind', zh:'友善的', em:'💗'},
+  {w:'quiet', zh:'安静的', em:'🤫'},
+  {w:'best', zh:'最好的', em:'🥇'},
+  {w:'read', zh:'读，阅读', em:'📖'},
+  {w:'Chinese', zh:'语文，中文', em:'📕'},
+  {w:'always', zh:'总是', em:'⏰'},
+  {w:'football', zh:'足球', em:'⚽'},
+  {w:'basketball', zh:'篮球', em:'🏀'},
+  {w:'play', zh:'玩，打（球）', em:'🎲'},
+  {w:'friend', zh:'朋友', em:'🧑‍🤝‍🧑'}
+];
+
+var PASSAGES = [
+  {title:'Passage 1 · My best friend',
+   lines:['Zhang Peng is my best friend. He is ten.',
+          'He is tall and strong.',
+          'He has short hair and big eyes.',
+          'He is very kind. He often helps me.',
+          'He is quiet in class, but he is funny after class.',
+          'We often play football together.',
+          'He always makes me smile.',
+          'I am happy to have a good friend.'],
+   text:'Zhang Peng is my best friend. He is ten. He is tall and strong. He has short hair and big eyes. He is very kind. He often helps me. He is quiet in class, but he is funny after class. We often play football together. He always makes me smile. I am happy to have a good friend.'},
+  {title:'Passage 2 · My friend Chen Jie',
+   lines:['Chen Jie is my good friend. She is nine.',
+          'She is short, but she is very strong.',
+          'She has long hair and a small mouth.',
+          'She is quiet in the library. She likes reading.',
+          'She can read Chinese books very well.',
+          'After class, she always plays games with me.',
+          'She is quiet, but she is very funny.',
+          'I like my friend very much.'],
+   text:'Chen Jie is my good friend. She is nine. She is short, but she is very strong. She has long hair and a small mouth. She is quiet in the library. She likes reading. She can read Chinese books very well. After class, she always plays games with me. She is quiet, but she is very funny. I like my friend very much.'},
+  {title:'Passage 3 · We play together',
+   lines:['My name is Lily. I am ten.',
+          'I have a new friend. Her name is Amy.',
+          'Amy is tall and she has long hair.',
+          'She is very kind to me.',
+          'We often play basketball after school.',
+          'She always says hello to my friends.',
+          'We are in the same class.',
+          'Good friends always help each other.'],
+   text:'My name is Lily. I am ten. I have a new friend. Her name is Amy. Amy is tall and she has long hair. She is very kind to me. We often play basketball after school. She always says hello to my friends. We are in the same class. Good friends always help each other.'}
+];
+
+/* ---- 五大板块 · 14 关（单词3 / 句型3 / 对话2 / 语法3 / 阅读3） ---- */
+var BOARDS = [
+{ id:'w', name:'单词岛', em:'🔤', bg:'#ffe3c7', desc:'12 个单元单词的闯关乐园',
+  games:[
+    {tid:'pick', name:'听写闯关', diff:2, ico:'🎧', noZh:1,
+     tip:'只听声音选单词，四个选项长得都很像，要听清楚尾音哦',
+     rounds:[
+       {say:'strong',     opts:['strong','song','story','stone']},
+       {say:'hair',       opts:['hair','here','hear','chair']},
+       {say:'kind',       opts:['kind','king','kid','find']},
+       {say:'quiet',      opts:['quiet','quite','quick','quiz']},
+       {say:'best',       opts:['best','rest','test','bend']},
+       {say:'read',       opts:['read','red','ready','rid']},
+       {say:'Chinese',    opts:['Chinese','China','chess','cheese']},
+       {say:'always',     opts:['always','away','also','alright']},
+       {say:'football',   opts:['football','basketball','footprint','footballer']},
+       {say:'basketball', opts:['basketball','baseball','volleyball','basket']},
+       {say:'play',       opts:['play','plate','plane','plan']},
+       {say:'friend',     opts:['friend','friends','friendly','fried']}
+     ]},
+    {tid:'pair', name:'单词消消乐', diff:2, ico:'🍉', tip:'点英文，再点它的中文意思，配对消除',
+     pairs:[
+       {a:'strong', b:'强壮的', em:'💪'},   {a:'quiet', b:'安静的', em:'🤫'},
+       {a:'kind', b:'友善的', em:'💗'},     {a:'best', b:'最好的', em:'🥇'},
+       {a:'hair', b:'头发', em:'👦'},       {a:'read', b:'阅读', em:'📖'},
+       {a:'Chinese', b:'语文', em:'📕'},    {a:'always', b:'总是', em:'⏰'},
+       {a:'football', b:'足球', em:'⚽'},   {a:'basketball', b:'篮球', em:'🏀'}
+     ]},
+    {tid:'spell', name:'单词流星雨', diff:3, ico:'☄️', tip:'接住掉下来的字母，每个单词要补 3 个字母',
+     items:[
+       {w:'strong',     holes:[2,3,4], extra:['a','e','i']},
+       {w:'friend',     holes:[2,3,4], extra:['a','o','u']},
+       {w:'quiet',      holes:[1,2,3], extra:['a','o','y']},
+       {w:'always',     holes:[2,3,5], extra:['i','o','u']},
+       {w:'kind',       holes:[1,2,3], extra:['a','e','o']},
+       {w:'hair',       holes:[1,2,3], extra:['e','o','u']},
+       {w:'football',   holes:[3,4,5], extra:['e','i','u']},
+       {w:'basketball', holes:[2,3,5], extra:['o','u','y']}
+     ]}
+  ]},
+{ id:'s', name:'句型魔法屋', em:'🧙', bg:'#fbe7d4', desc:'12 个课本句型的闯关乐园',
+  games:[
+    {tid:'pickimg', name:'听句选图', diff:1, ico:'🖼️', tip:'听句子，选出正确的图片',
+     rounds:[
+       {say:"He's tall and strong.",     opts:['💪','🤫','📖','⚽'], right:0},
+       {say:'She has long hair.',        opts:['👦','👧','🧔','👴'], right:1},
+       {say:"He's very kind.",           opts:['😡','💗','😴','🍎'], right:1},
+       {say:'She is quiet.',             opts:['🤫','📢','🏃','🎉'], right:0},
+       {say:'We play football.',         opts:['🏀','⚽','📖','🎮'], right:1},
+       {say:'I read Chinese books.',     opts:['📕','🎮','⚽','🎨'], right:0},
+       {say:'He often helps me.',        opts:['🤝','💤','🍔','🎈'], right:0},
+       {say:'We are best friends.',      opts:['🙅','🧑‍🤝‍🧑','🐶','🌧️'], right:1}
+     ]},
+    {tid:'order', name:'连词成句小火车', diff:2, ico:'🚂', tip:'把车厢里的单词排好，拼出课本句',
+     rounds:[
+       {sen:["Who's", 'your', 'best', 'friend?'], zh:'你最好的朋友是谁？'},
+       {sen:['His', 'name', 'is', 'Zhang', 'Peng.'], zh:'他叫张鹏。'},
+       {sen:['Her', 'name', 'is', 'Chen', 'Jie.'], zh:'她叫陈洁。'},
+       {sen:['I', 'have', 'a', 'new', 'friend.'], zh:'我有一个新朋友。'},
+       {sen:["He's", 'tall', 'and', 'strong.'], zh:'他又高又壮。'},
+       {sen:['She', 'has', 'short', 'hair.'], zh:'她有一头短头发。'},
+       {sen:['He', 'often', 'helps', 'me.'], zh:'他经常帮助我。'},
+       {sen:["She's", 'quiet', 'but', 'kind.'], zh:'她很安静但很友善。'},
+       {sen:["Let's", 'play', 'football!'], zh:'我们一起踢足球吧！'},
+       {sen:['We', 'often', 'play', 'games.'], zh:'我们经常一起做游戏。'}
+     ]},
+    {tid:'cloze', name:'英语挖空大师', diff:3, ico:'🕳️', tip:'看句子选词填空，这一关没有声音，请自己读句子',
+     rounds:[
+       {before:'He', after:'short hair.', hole:'has', opts:['have','has','haves'], full:'He has short hair.', zh:'他有一头短头发。（主语 he 用 has）'},
+       {before:'I', after:'a new friend.', hole:'have', opts:['has','have','having'], full:'I have a new friend.', zh:'我有一个新朋友。（主语 I 用 have）'},
+       {before:'She often', after:'me.', hole:'helps', opts:['help','helps','helping'], full:'She often helps me.', zh:'她经常帮助我。（主语 she，动词加 s）'},
+       {before:"What's your", after:'name?', hole:"friend's", opts:['friend','friends',"friend's"], full:"What's your friend's name?", zh:'你朋友叫什么名字？'},
+       {before:'We often', after:'football.', hole:'play', opts:['plays','play','playing'], full:'We often play football.', zh:'我们经常踢足球。（we 用原形）'},
+       {before:"She's quiet", after:'kind.', hole:'but', opts:['and','but','or'], full:"She's quiet but kind.", zh:'她安静但友善。（转折用 but）'},
+       {before:'He', after:'tall and strong.', hole:'is', opts:['is','are','am'], full:'He is tall and strong.', zh:'他又高又壮。'},
+       {before:'They', after:'good friends.', hole:'are', opts:['is','are','am'], full:'They are good friends.', zh:'他们是好朋友。（复数用 are）'},
+       {before:'Her', after:'is Chen Jie.', hole:'name', opts:['name','names','naming'], full:'Her name is Chen Jie.', zh:'她叫陈洁。'},
+       {before:'He is', after:'best friend.', hole:'my', opts:['I','my','me'], full:'He is my best friend.', zh:'他是我最好的朋友。'},
+       {before:'Can you', after:'football?', hole:'play', opts:['play','plays','playing'], full:'Can you play football?', zh:'你会踢足球吗？（can 后接原形）'},
+       {before:'We', after:'play games together.', hole:'often', opts:['often','oftens','oftenly'], full:'We often play games together.', zh:'我们经常一起玩游戏。'}
+     ]}
+  ]},
+{ id:'t', name:'对话小剧场', em:'🎭', bg:'#e2f6d9', desc:'全英文对话 · 快问快答 · 限时抢答',
+  games:[
+    {tid:'pick', name:'单词快问快答', diff:2, ico:'⚡', noZh:1,
+     tip:'听英文问题，选出合适的回答（没有中文提示，专心听）',
+     rounds:[
+       {say:"Who's your best friend?", opts:['Zhang Peng.','Yes, he is.','I am ten.'], right:0},
+       {say:'Is he tall?', opts:['Yes, he is.','Yes, she is.','Yes, it is.'], right:0},
+       {say:"What's her name?", opts:['Her name is Chen Jie.','His name is Chen Jie.',"I'm Chen Jie."], right:0},
+       {say:'Is she quiet?', opts:["No, she isn't.","No, he isn't.","No, I'm not."], right:0},
+       {say:'Can she read Chinese?', opts:['Yes, she can.','Yes, he can.','Yes, it can.'], right:0},
+       {say:'Who is your good friend?', opts:['Chen Jie is.','Yes, she is.','I am fine.'], right:0},
+       {say:"Let's play football!", opts:["Great! Let's go!",'Yes, she is.','I am ten.'], right:0},
+       {say:'Is he kind?', opts:['Yes, he is very kind.','Yes, she is very kind.','Yes, I am kind.'], right:0},
+       {say:'Are they good friends?', opts:['Yes, they are.','Yes, she is.','Yes, I am.'], right:0},
+       {say:"What's his name?", opts:['His name is Zhang Peng.','Her name is Zhang Peng.',"I'm Zhang Peng."], right:0}
+     ]},
+    {tid:'rush', name:'抢答大作战', diff:3, ico:'⏱️', noZh:1, seconds:10,
+     tip:'10 秒内抢答！答对 4 题以上算赢，全英文无中文提示',
+     rounds:[
+       {say:'Is he strong?', opts:['Yes, he is.','Yes, she is.','Yes, they are.'], right:0},
+       {say:'Is she your good friend?', opts:['Yes, she is.',"No, he isn't.",'Yes, I am.'], right:0},
+       {say:'Can he play football?', opts:['Yes, he can.',"No, she can't.",'Yes, it can.'], right:0},
+       {say:'Can they play basketball?', opts:['Yes, they can.','Yes, she can.','Yes, it can.'], right:0},
+       {say:'Are you good friends?', opts:['Yes, we are.','Yes, they are.','Yes, she is.'], right:0},
+       {say:'Is he your best friend?', opts:['Yes, he is.','Yes, she is.',"No, he doesn't."], right:0},
+       {say:'Is her hair long?', opts:['Yes, it is.','Yes, she is.','Yes, he is.'], right:0},
+       {say:'Is your friend kind?', opts:['Yes, she is very kind.','Yes, he can.',"No, it isn't."], right:0}
+     ]}
+  ]},
+{ id:'g', name:'语法特工队', em:'🛡️', bg:'#ffeacc', desc:'词形分类 · 抓错句 · 快问快答',
+  games:[
+    {tid:'sort', name:'语法分类基地', diff:2, ico:'📦', tip:'把单词送回正确的基地：形容词 or 动词',
+     bins:['形容词（描述人）','动词（动作）'],
+     items:[
+       {t:'strong', b:0, zh:'强壮的'},
+       {t:'quiet',  b:0, zh:'安静的'},
+       {t:'kind',   b:0, zh:'友善的'},
+       {t:'tall',   b:0, zh:'高的'},
+       {t:'funny',  b:0, zh:'有趣的'},
+       {t:'play',   b:1, zh:'玩'},
+       {t:'read',   b:1, zh:'读'},
+       {t:'help',   b:1, zh:'帮助'},
+       {t:'smile',  b:1, zh:'微笑'},
+       {t:'make',   b:1, zh:'使，让'}
+     ]},
+    {tid:'pick', name:'警察抓小偷', diff:3, ico:'👮', tip:'三个句子里混进了一个"小偷"，把它抓出来！', bigOpt:1,
+     rounds:[
+       {zh:'🔍 哪一句是小偷写的？', opts:['He have short hair.', 'She has long hair.', "He's tall and strong."], right:0, why:'主语 he 要用 has 哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:['His name is Zhang Peng.', 'Her name is Chen Jie.', 'He name is Zhang Peng.'], right:2, why:'「他的」是 his 哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:['She often help me.', 'She often helps me.', 'I often help her.'], right:0, why:'主语 she，动词要加 s 哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:['He is quiet but kind.', 'He is quiet and but kind.', 'He is quiet and kind.'], right:1, why:'but 和 and 不能一起用哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:['We often plays games.', 'We often play games.', "Let's play games!"], right:0, why:'we 后面用动词原形 play 哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:['He is tall and strong.', 'He tall and strong.', 'He is tall or strong.'], right:1, why:'少了 is 哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:["Who's your best friend?", 'Who your best friend?', "He's my best friend."], right:1, why:'问「谁」要用 Who\'s 哦！'},
+       {zh:'🔍 哪一句是小偷写的？', opts:['She has a small mouth.', 'She have a small mouth.', 'They has a small mouth.'], right:1, why:'主语 she 要用 has 哦！'}
+     ]},
+    {tid:'pick', name:'语法快问快答', diff:3, ico:'🏅', bigOpt:1,
+     tip:'读句子，选出语法正确的答案（比一比谁更细心）',
+     rounds:[
+       {zh:'He ______ short hair.', opts:['have','has','is'], right:1, why:'主语 he 用 has。'},
+       {zh:'I ______ a new friend.', opts:['has','have','am'], right:1, why:'主语 I 用 have。'},
+       {zh:'She ______ very kind.', opts:['are','am','is'], right:2, why:'she 用 is。'},
+       {zh:'They ______ good friends.', opts:['is','are','am'], right:1, why:'复数用 are。'},
+       {zh:'He often ______ me.', opts:['help','helps','helping'], right:1, why:'he 是三单，动词加 s。'},
+       {zh:"What ______ your friend's name?", opts:['is','are','am'], right:0, why:'name 是单数，用 is。'},
+       {zh:'We often ______ football after school.', opts:['play','plays','playing'], right:0, why:'we 后面用原形 play。'},
+       {zh:'______ name is Chen Jie.', opts:['She','Her','Hers'], right:1, why:'「她的」后面跟名词，用 Her。'}
+     ]}
+  ]},
+{ id:'r', name:'阅读小书虫', em:'📖', bg:'#e6f0ff', desc:'读懂短文 · 判一判 · 选一选 · 填一填',
+  games:[
+    {tid:'judge', name:'听读判一判', diff:3, ico:'✅', tip:'Read the passage, then choose YES or NO',
+     passage:0, noAudio:1,
+     items:[
+       {say:'Zhang Peng is my best friend.',        ok:true},
+       {say:'He is short and thin.',                ok:false},
+       {say:'He has short hair and big eyes.',       ok:true},
+       {say:'He often helps me.',                    ok:true},
+       {say:'We often play basketball together.',    ok:false},
+       {say:'He is quiet in class.',                 ok:true},
+       {say:'He never makes me smile.',              ok:false},
+       {say:'I am happy to have a good friend.',     ok:true}
+     ]},
+    {tid:'pick', name:'阅读选择题', diff:3, ico:'❓', tip:'读短文，选出正确答案', passage:1, noZh:1,
+     rounds:[
+       {say:'How old is Chen Jie?', opts:['She is eight.', 'She is nine.', 'She is ten.'], right:1},
+       {say:'Is Chen Jie tall?', opts:['Yes, she is.', "No, she isn't.", 'Yes, he is.'], right:1},
+       {say:'What does Chen Jie like?', opts:['She likes reading.', 'She likes football.', 'She likes cooking.'], right:0},
+       {say:'What can she read very well?', opts:['Chinese books.', 'English books.', 'Picture books.'], right:0},
+       {say:'Where is Chen Jie quiet?', opts:['In the library.', 'In the park.', 'At home.'], right:0},
+       {say:'Who does she play games with?', opts:['With me.', 'With her mum.', 'With her teacher.'], right:0},
+       {say:'Is Chen Jie funny?', opts:['Yes, she is.', "No, she isn't.", 'Yes, he is.'], right:0}
+     ]},
+    {tid:'clozep', name:'阅读填空大师', diff:3, ico:'✏️', tip:'读短文，把挖掉的单词填回去', passage:0, noAudio:1,
+     blanks:[
+       {hole:'best',     opts:['best','better'],             full:'Zhang Peng is my best friend.'},
+       {hole:'strong',   opts:['strong','thin'],           full:'He is tall and strong.'},
+       {hole:'hair',     opts:['hair','hand'],              full:'He has short hair and big eyes.'},
+       {hole:'kind',     opts:['kind','king'],             full:'He is very kind.'},
+       {hole:'helps',    opts:['helps','help'],             full:'He often helps me.'},
+       {hole:'quiet',    opts:['quiet','quite'],             full:'He is quiet in class.'},
+       {hole:'football', opts:['football','basketball'],    full:'We often play football together.'}
+     ]}
+  ]}
+];
+
+var SAY_ALL = [];
+(function collectSay(){
+  function push(s){ if(s && SAY_ALL.indexOf(s) < 0) SAY_ALL.push(s); }
+  WORDS.forEach(function(x){ push(x.w); });
+  BOARDS.forEach(function(b){
+    b.games.forEach(function(g){
+      (g.rounds || []).forEach(function(r){
+        if(r.say) push(r.say);
+        if(r.full) push(r.full);
+        (r.clues || []).forEach(push);   /* 题干 prompt 只显示不朗读，不进朗读清单 */
+        (r.opts || []).forEach(function(o){ if(/[a-zA-Z]/.test(o)) push(o); });
+        if(r.sen) push(r.sen.join(' '));
+      });
+      (g.pairs || []).forEach(function(p){ push(p.a); if(/[a-zA-Z]/.test(p.b||'')) push(p.b); });
+      (g.items || []).forEach(function(it){
+        push(it.w || it.t || it.say);
+        if(it.full) push(it.full);
+        (it.clues || []).forEach(push);
+      });
+      (g.blanks || []).forEach(function(bl){ push(bl.full); (bl.opts||[]).forEach(push); });
+    });
+  });
+  PASSAGES.forEach(function(p){ p.lines.forEach(push); });
+})();
+
+/* ================= 游戏运行时 ================= */
+initProg();
+var G = {b:0, g:0, game:null, round:0, lock:false, rushT:null, rushLeft:0, curSay:'', score:0, done:0};
+
+/* ================= 提示 / 生词助手（照顾基础薄弱的孩子） ================= */
+(function injectHintStyle(){
+  if(document.getElementById('hint-style')) return;
+  var st = document.createElement('style');
+  st.id = 'hint-style';
+  st.textContent =
+    '.hint-wrap{margin:14px 0 2px;}' +
+    '.hint-btn{display:inline-block;background:#fff8e6;border:2px dashed #ffcf6b;color:#a8761a;' +
+      'font-weight:700;font-size:14px;border-radius:14px;padding:9px 15px;cursor:pointer;line-height:1.4;}' +
+    '.hint-btn:active{transform:scale(.97);}' +
+    '.hint-body{display:none;margin-top:9px;background:#fffdf5;border:2px solid #ffe3a8;border-radius:14px;' +
+      'padding:12px 14px;font-size:14.5px;line-height:1.8;color:#6b5320;text-align:left;}' +
+    '.hint-body.on{display:block;}' +
+    '.hint-body b{color:#b8560f;}' +
+    '.note-item{padding:4px 0;border-bottom:1px dashed #f0dfb8;}' +
+    '.note-item:last-child{border-bottom:none;}' +
+    '.zh-hint{font-size:13.5px;color:#8a97ab;margin-top:7px;line-height:1.6;font-weight:400;}' +
+    '.read-q{background:#fff;border:3px solid #cfe3f7;border-radius:16px;padding:12px 14px;margin:10px 0 4px;' +
+      'font-size:17px;font-weight:700;color:var(--deep);line-height:1.6;text-align:center;}';
+  document.head.appendChild(st);
+})();
+
+/* 折叠提示：做不出来再点开，不直接给答案 */
+function hintBox(h){
+  if(!h) return '';
+  return '<div class="hint-wrap">' +
+    '<button class="hint-btn" onclick="' +
+      'var b=this.nextElementSibling;var on=b.classList.toggle(\'on\');' +
+      'this.textContent=on?\'💡 收起提示\':\'💡 卡住了？点这里看提示\';">💡 卡住了？点这里看提示</button>' +
+    '<div class="hint-body">' + h + '</div></div>';
+}
+
+/* 生词小助手：文章里难词的中文意思 */
+function wordHelp(p){
+  var pas = PASSAGES[p];
+  if(!pas || !pas.notes || !pas.notes.length) return '';
+  return '<div class="hint-wrap">' +
+    '<button class="hint-btn" onclick="' +
+      'var b=this.nextElementSibling;var on=b.classList.toggle(\'on\');' +
+      'this.textContent=on?\'📖 收起生词表\':\'📖 生词小助手（难词中文意思）\';">📖 生词小助手（难词中文意思）</button>' +
+    '<div class="hint-body">' +
+      pas.notes.map(function(n){ return '<div class="note-item">' + n + '</div>'; }).join('') +
+    '</div></div>';
+}
+
+function renderHome(){
+  var map = document.getElementById('board-map');
+  var html = '';
+  BOARDS.forEach(function(b, bi){
+    html += '<button class="lv-card" onclick="openBoard(' + bi + ')">' +
+      '<div class="lv-ico" style="background:' + b.bg + ';">' + b.em + '</div>' +
+      '<div><h3>' + b.name + '</h3><p>' + b.desc + '<br>' +
+      b.games.map(function(g){ return g.ico + g.name; }).join(' · ') + '</p></div>' +
+      '<div class="stars-mini" data-b="' + b.id + '">' + new Array(b.games.length + 1).join('☆') + '</div></button>';
+  });
+  map.innerHTML = html;
+  refreshStars();
+}
+function openBoard(bi){
+  var b = BOARDS[bi];
+  G.b = bi;
+  document.getElementById('board-title').textContent = b.em + ' ' + b.name;
+  var list = document.getElementById('game-list');
+  var html = '<div class="goal">' + b.desc + '。' + b.games.length + ' 个小游戏由易到难，全部通关点亮 ' + b.games.length + ' 颗星！</div>';
+  b.games.forEach(function(g, gi){
+    var key = b.id + gi;
+    var dots = '';
+    for(var d=0; d<g.diff; d++) dots += '<span class="diff-dot diff-' + g.diff + '"></span>';
+    html += '<button class="g-item" onclick="startGame(' + bi + ',' + gi + ')">' +
+      '<div class="g-ico" style="background:' + b.bg + ';">' + g.ico + '</div>' +
+      '<div><h3>' + g.name + '</h3><p>' + dots + '<span class="diff-tag">难度 ' + g.diff + '/3</span> · ' + g.tip + '</p></div>' +
+      '<div class="g-done">' + (P[key] ? '⭐' : '') + '</div></button>';
+  });
+  list.innerHTML = html;
+  go('sc-board');
+}
+
+var RUNNERS = {};
+function startGame(bi, gi){
+  var b = BOARDS[bi], g = b.games[gi];
+  G.b = bi; G.g = gi; G.game = g; G.round = 0; G.lock = false; G.score = 0; G.done = 0;
+  G.curSay = '';
+  document.getElementById('game-title').textContent = b.name + ' · ' + g.ico + ' ' + g.name;
+  go('sc-game');
+  renderDots();
+  renderRound();
+}
+function quitGame(){
+  if(G.rushT){ clearInterval(G.rushT); G.rushT = null; }
+  stopSay();
+  go('sc-board');
+  openBoard(G.b);
+}
+function resay(){ if(G.curSay) say(G.curSay); }
+function renderDots(){
+  var n = gameLen(G.game), el = document.getElementById('game-dots'), h = '';
+  for(var i=0;i<n;i++) h += '<div class="dot' + (i < G.round ? ' on' : '') + '"></div>';
+  el.innerHTML = h;
+}
+function gameLen(g){
+  if(g.tid === 'pair') return g.pairs.length;
+  if(g.tid === 'scene') return g.scenes.length;
+  if(g.tid === 'sort') return g.items.length;
+  if(g.tid === 'essay') return g.stories.length;
+  if(g.tid === 'clozep') return g.blanks.length;
+  if(g.tid === 'spell') return g.items.length;
+  if(g.tid === 'clue') return g.items.length;
+  if(g.tid === 'anagram') return g.items.length;
+  if(g.tid === 'judge') return g.items.length;
+  return (g.rounds || []).length;
+}
+function renderRound(){
+  fb('', true);
+  renderDots();
+  var stage = document.getElementById('game-stage');
+  var r = RUNNERS[G.game.tid];
+  stage.innerHTML = '';
+  if(r) r(stage, G.game);
+}
+function nextRound(){
+  G.lock = false;
+  if(G.rushT){ clearInterval(G.rushT); G.rushT = null; }
+  G.round++;
+  if(G.round >= gameLen(G.game)){ finishGame(); return; }
+  renderRound();
+}
+function finishGame(){
+  var b = BOARDS[G.b], g = G.game;
+  var ok = true;
+  if(g.tid === 'rush' && G.score < 4){
+    ok = false;
+    document.getElementById('game-stage').innerHTML =
+      '<div class="stage" style="text-align:center;"><div style="font-size:56px;">⏱️</div>' +
+      '<h3 style="color:#a6641c;">抢到 ' + G.score + '/' + gameLen(g) + ' 题！</h3>' +
+      '<p style="color:#68799a;">再抢对 4 题以上就能赢哦，再试一次！</p>' +
+      '<button class="big-btn orange" onclick="startGame(G.b,G.g)">🔄 再来一次</button>' +
+      '<button class="big-btn green" onclick="quitGame()">🏠 回板块</button></div>';
+    fb('抢答大作战要答对 4 题以上才算赢哦！', false);
+    return;
+  }
+  P[b.id + G.g] = 1;
+  saveP();
+  party(30);
+  var allNow = totalDone();
+  document.getElementById('game-stage').innerHTML =
+    '<div class="stage" style="text-align:center;"><div style="font-size:56px;">🎉</div>' +
+    '<h3 style="color:#1a5fa0;">' + g.name + ' 通关！</h3>' +
+    '<p style="color:#68799a;">点亮第 ' + allNow + ' 颗星！' +
+    (allNow >= TOTAL_STARS ? '<br><b style="color:#e2703a;">全部 ' + TOTAL_STARS + ' 关通关！去领奖状吧！🏆</b>' :
+     '还差 ' + (TOTAL_STARS - allNow) + ' 关就能领奖状～') + '</p>' +
+    '<button class="big-btn green" onclick="quitGame()">🏠 回板块选下一关</button></div>';
+  fb('Wonderful!', true);
+}
+
+/* ---- 通用：朗读按钮 + 题干 ---- */
+function speakBtn(text, big){
+  return '<button class="speaker' + (big ? '' : ' speaker-sm') + '" onclick="say(\'' + esc(text) + '\')">🔊</button>';
+}
+function esc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function showZh(zh){
+  return zh ? '<div class="word-hint">' + zh + '</div>' : '';
+}
+function passageBox(p){
+  var pas = PASSAGES[p];
+  return '<div class="passage"><div class="p-title">' + pas.title + ' <button class="odd-w" style="font-size:13px;padding:6px 12px;min-height:36px;" onclick="readPassage(' + p + ')">🔊 Read</button></div>' +
+    pas.lines.map(function(l){ return '<div>' + l + '</div>'; }).join('') + '</div>' + wordHelp(p);
+}
+function readPassage(p){
+  var pas = PASSAGES[p];
+  var seq = 0;
+  function step(){
+    if(seq >= pas.lines.length) return;
+    say(pas.lines[seq], function(){ seq++; setTimeout(step, 250); });
+  }
+  step();
+}
+
+/* ---- Runner: pick（听写闯关 / 听句选图 / 快问快答 / 抢答 / 阅读选择 / 警察抓小偷 / 语法快问快答） ---- */
+RUNNERS.pick = RUNNERS.pickimg = function(stage, g){
+  var r = g.rounds[G.round];
+  var rRight = (r.right === undefined ? 0 : r.right);
+  var idx = shuffle(r.opts.map(function(_, i){ return i; }));
+  var rightPos = idx.indexOf(rRight);
+  var opts = idx.map(function(i){ return r.opts[i]; });
+  G.testRight = rightPos;   /* 自动化测试钩子 */
+  var html = '';
+  if(typeof g.passage === 'number') html += passageBox(g.passage);
+  if(r.prompt){
+    /* 英文题干卡：英英释义 / 阅读题 / 情景对话 / 听对话答问题 */
+    html += '<div class="prompt-card">' + r.prompt +
+      (r.zhHint ? '<div class="zh-hint">' + r.zhHint + '</div>' : '') +
+      (r.say ? '<div style="margin-top:8px;"><button class="odd-w" style="font-size:14px;padding:6px 12px;" onclick="resay()">🔊 Listen again</button></div>' : '') +
+      '</div>';
+  } else if(g.tid === 'pickimg' || g.showEm || r.showEm){
+    html += '<div class="speaker" onclick="resay()">🔊</div>';
+  } else if(g.noZh){
+    html += '<div class="speaker" onclick="resay()">🔊</div>';
+  } else {
+    html += '<div class="goal" style="text-align:center;font-size:16.5px;">' + (r.zh || '') +
+      (r.say ? ' <button class="odd-w" style="font-size:13px;padding:4px 8px;margin-left:6px;" onclick="resay()">🔊 听题</button>' : '') + '</div>';
+  }
+  G.curSay = r.say || '';
+  if(g.tid === 'rush'){
+    html += '<div class="rush-bar"><div class="rush-fill" id="rush-fill"></div></div>';
+  }
+  var cls = g.bigOpt ? 'opts opts-1col' : 'opts';
+  html += '<div class="' + cls + '" id="opt-row">';
+  opts.forEach(function(o, i){
+    var isEm = g.tid === 'pickimg' && !/[a-zA-Z]/.test(o);
+    if(g.showEm || r.showEm){
+      var wd = WORDS.filter(function(x){ return x.w === o; })[0];
+      html += '<button class="opt" data-i="' + i + '"><span class="em">' + (wd ? wd.em : '❓') + '</span>' + o + '</button>';
+    } else {
+      html += '<button class="opt' + (isEm ? ' opt-em' : '') + '" data-i="' + i + '">' +
+        (isEm ? '<span class="em">' + o + '</span>' : o) + '</button>';
+    }
+  });
+  html += '</div>';
+  html += hintBox(r.hint);
+  stage.innerHTML = html;
+  var row = document.getElementById('opt-row');
+  row.onclick = function(e){
+    if(G.lock) return;
+    var t = e.target.closest('.opt'); if(!t) return;
+    var i = +t.getAttribute('data-i');
+    if(i === rightPos){
+      G.lock = true;
+      t.classList.add('correct');
+      if(g.tid === 'rush') G.score++;
+      fb(['Wonderful! 🎉','Great job! 🌟','You got it! 💪','Super! 🚀'][Math.floor(Math.random()*4)], true);
+      if(g.showEm || r.showEm || g.tid === 'pickimg') say(r.say);
+      else if(r.say) say(opts[i]);
+      setTimeout(nextRound, 1300);
+    } else {
+      t.classList.add('wrong');
+      fb(r.why || (g.noZh ? 'Try again!' : '再想一想哦～'), false);
+      setTimeout(function(){ t.classList.remove('wrong'); }, 700);
+    }
+  };
+  if(g.tid === 'rush'){
+    G.rushLeft = g.seconds || 12;
+    var fill = document.getElementById('rush-fill');
+    fill.style.width = '100%';
+    if(G.rushT) clearInterval(G.rushT);
+    G.rushT = setInterval(function(){
+      G.rushLeft -= 0.2;
+      if(fill) fill.style.width = Math.max(0, G.rushLeft / (g.seconds||12) * 100) + '%';
+      if(G.rushLeft <= 0){
+        clearInterval(G.rushT); G.rushT = null;
+        fb((g.noZh ? 'Time is up! Answer: ' : '时间到！正确答案：') + r.opts[rRight], false);
+        G.lock = true;
+        setTimeout(nextRound, 1600);
+      }
+    }, 200);
+  }
+  if(G.curSay) setTimeout(function(){ resay(); }, 400);
+};
+
+/* rush（抢答大作战）复用 pick 渲染器（含倒计时条与计分） */
+RUNNERS.rush = RUNNERS.pick;
+
+/* ---- Runner: pair（单词消消乐 / 问答连线） ---- */
+RUNNERS.pair = function(stage, g){
+  var isConnect = !!g.pairs[0].a.match(/\?$/);
+  var left = shuffle(g.pairs.map(function(p, i){ return {t:p.a, i:i, em:p.em}; }));
+  var right = shuffle(g.pairs.map(function(p, i){ return {t:p.b, i:i}; }));
+  var html = '<div class="pairs-wrap"><div class="pairs-col">';
+  left.forEach(function(x){
+    html += '<div class="pair-chip cn-item" data-side="L" data-i="' + x.i + '">' + (x.em ? '<span class="em">' + x.em + '</span>' : '') + x.t + '</div>';
+  });
+  html += '</div><div class="pairs-col">';
+  right.forEach(function(x){
+    html += '<div class="pair-chip cn-item" data-side="R" data-i="' + x.i + '">' + x.t + '</div>';
+  });
+  html += '</div></div>';
+  stage.innerHTML = html;
+  G.curSay = '';
+  G.sel = null;
+  stage.querySelector('.pairs-wrap').onclick = function(e){
+    var t = e.target.closest('.pair-chip'); if(!t || G.lock) return;
+    var side = t.getAttribute('data-side'), i = +t.getAttribute('data-i');
+    if(t.classList.contains('gone') || t.classList.contains('ok')) return;
+    if(!G.sel){ G.sel = {side:side, i:i, el:t}; t.classList.add('sel');
+      if(side === 'L' && g.pairs[i].a) say(g.pairs[i].a);
+      if(side === 'R') say(g.pairs[i].b);
+      return; }
+    if(G.sel.side === side){ G.sel.el.classList.remove('sel'); G.sel = {side:side, i:i, el:t}; t.classList.add('sel');
+      if(side === 'L') say(g.pairs[i].a); else say(g.pairs[i].b);
+      return; }
+    if(G.sel.i === i){
+      G.lock = true;
+      t.classList.remove('sel'); G.sel.el.classList.remove('sel');
+      t.classList.add('ok'); G.sel.el.classList.add('ok');
+      fb(isConnect ? '配对成功！大声读出来～' : '消除成功！', true);
+      saySafe(isConnect ? g.pairs[i].a : g.pairs[i].a);
+      t.classList.add('gone'); G.sel.el.classList.add('gone');
+      G.done++;
+      G.lock = false; G.sel = null;
+      if(G.done >= g.pairs.length){ setTimeout(finishGame, 700); }
+    } else {
+      t.classList.add('bad'); G.sel.el.classList.add('bad');
+      fb('不是这一对哦，再试试～', false);
+      var el1 = t, el2 = G.sel.el;
+      setTimeout(function(){ el1.classList.remove('bad'); el2.classList.remove('bad'); el2.classList.remove('sel'); G.sel = null; }, 650);
+    }
+  };
+};
+
+/* ---- Runner: spell（单词流星雨） ---- */
+RUNNERS.spell = function(stage, g){
+  var it = g.items[G.round];
+  var letters = it.w.split('');
+  var holes = it.holes;
+  var need = holes.map(function(h){ return letters[h]; });
+  var pool = shuffle(need.concat(it.extra));
+  G.holeIdx = 0; G.lock = false;
+  var slots = '';
+  letters.forEach(function(ch, i){
+    if(holes.indexOf(i) >= 0) slots += '<span data-h="' + i + '"></span>';
+    else slots += '<span style="border-bottom:none;">' + ch + '</span>';
+  });
+  var wObj = WORDS.filter(function(x){ return x.w === it.w; })[0];
+  var html = '<div style="font-size:56px;text-align:center;">' + (wObj ? wObj.em : '⭐') + '</div>' +
+    '<div class="drop-word drop-slots" id="drop-word">' + slots + '</div>' +
+    showZh(wObj ? wObj.zh : '') +
+    '<div class="drop-letters" id="drop-letters">';
+  pool.forEach(function(ch, i){
+    html += '<button class="drop-lb" data-ch="' + ch + '">' + ch + '</button>';
+  });
+  html += '</div>';
+  stage.innerHTML = html;
+  G.curSay = it.w;
+  document.getElementById('drop-letters').onclick = function(e){
+    var t = e.target.closest('.drop-lb'); if(!t || G.lock) return;
+    var ch = t.getAttribute('data-ch');
+    if(ch === need[G.holeIdx]){
+      G.lock = true;
+      t.classList.add('used');
+      var sp = document.querySelector('#drop-word span[data-h="' + holes[G.holeIdx] + '"]');
+      if(sp){ sp.textContent = ch; sp.classList.add('filled'); }
+      G.holeIdx++;
+      if(G.holeIdx >= holes.length){
+        fb('Perfect! ' + it.w + '！', true);
+        sayThen(it.w, function(){ G.lock = false; nextRound(); }, 3000);
+      } else { G.lock = false; fb('接住了一个字母！', true); }
+    } else {
+      t.classList.add('used'); /* 假动作：闪一下就恢复 */
+      fb('这个字母不是下一个哦～', false);
+      setTimeout(function(){ t.classList.remove('used'); }, 450);
+    }
+  };
+  setTimeout(function(){ resay(); }, 400);
+};
+
+/* ---- Runner: order（连词成句小火车 / 单词听力排序） ---- */
+RUNNERS.order = function(stage, g){
+  var r = g.rounds[G.round];
+  G.lock = false;
+  var pool = shuffle(r.sen.map(function(w, i){ return {w:w, i:i}; }));
+  var isTrain = !g.listen;
+  var html = showZh(r.zh);
+  if(isTrain) html += '<div style="text-align:center;font-size:34px;margin:2px 0;">🚂🚃🚃🚃</div>';
+  html += '<div class="sentence-line" id="train-line"></div>' +
+    '<div class="chip-pool" id="chip-pool">';
+  pool.forEach(function(x){
+    html += '<button class="chip" data-i="' + x.i + '">' + x.w + '</button>';
+  });
+  html += '</div>';
+  if(isTrain) html += '<button class="say-btn" onclick="say(' + "'" + esc(r.sen.join(' ')) + "'" + ')">🔊 读整句</button>';
+  stage.innerHTML = html;
+  G.curSay = g.listen ? r.sen.join(' ') : '';
+  G.placed = 0;
+  document.getElementById('chip-pool').onclick = function(e){
+    var t = e.target.closest('.chip'); if(!t || G.lock) return;
+    var i = +t.getAttribute('data-i');
+    if(i === G.placed){
+      G.lock = true;
+      t.classList.add('used');
+      var pl = document.createElement('button');
+      pl.className = 'placed'; pl.textContent = r.sen[i];
+      document.getElementById('train-line').appendChild(pl);
+      saySafe(r.sen[i]);
+      G.placed++; G.lock = false;
+      if(G.placed >= r.sen.length){
+        fb('整句完成！', true);
+        sayThen(r.sen.join(' '), function(){ nextRound(); }, 4500);
+      }
+    } else {
+      t.classList.add('bad');
+      fb('顺序不对哦，听一听再排～', false);
+      setTimeout(function(){ t.classList.remove('bad'); }, 600);
+    }
+  };
+  if(g.listen) setTimeout(function(){ resay(); }, 400);
+};
+
+/* ---- Runner: cloze（英语挖空大师） ---- */
+RUNNERS.cloze = function(stage, g){
+  var r = g.rounds[G.round];
+  G.lock = false;
+  var html = '<div class="passage" style="font-size:20px;text-align:center;">' +
+    (r.before ? r.before + ' ' : '') +
+    '<span class="blank cur" style="min-width:90px;">' + r.hole.replace(/[a-zA-Z']/g, '_') + '</span>' +
+    (r.after ? ' ' + r.after : '') + '</div>' +
+    '<div class="chips-row" id="cloze-chips">';
+  shuffle(r.opts.slice()).forEach(function(o){
+    html += '<button class="word-chip" data-w="' + o.replace(/"/g,'&quot;') + '">' + o + '</button>';
+  });
+  html += '</div>' + showZh(r.zh);
+  stage.innerHTML = html;
+  G.curSay = '';   /* 本关不提供声音提示，靠读句子判断 */
+  document.getElementById('cloze-chips').onclick = function(e){
+    var t = e.target.closest('.word-chip'); if(!t || G.lock) return;
+    if(t.getAttribute('data-w') === r.hole){
+      G.lock = true;
+      t.classList.add('correct');
+      var bl = stage.querySelector('.blank');
+      if(bl){ bl.textContent = r.hole; bl.classList.remove('cur'); bl.classList.add('filled'); }
+      fb('Correct! ' + r.full, true);
+      setTimeout(nextRound, 1200);
+    } else {
+      t.classList.add('wrong');
+      fb(r.zh ? '再读一遍句子，看提示哦～' : 'Try again!', false);
+      setTimeout(function(){ t.classList.remove('wrong'); }, 600);
+    }
+  };
+};
+
+/* ---- Runner: clozep（阅读填空大师） ---- */
+RUNNERS.clozep = function(stage, g){
+  var pas = PASSAGES[g.passage];
+  var optsAll = [];
+  g.blanks.forEach(function(b){
+    b.opts.forEach(function(o){ if(optsAll.indexOf(o) < 0) optsAll.push(o); });
+  });
+  optsAll = shuffle(optsAll);
+  G.cz = {i:0, lock:false};
+  var html = '<div class="passage"><div class="p-title">' + pas.title + '</div><div id="cz-text">';
+  html += pas.text.split(' ').map(function(wd){
+    var hit = g.blanks.filter(function(b){ return b.hole === wd.replace(/[.,!?]/g,''); })[0];
+    if(hit){
+      var punct = (wd.match(/[.,!?]+$/) || [''])[0];
+      return '<span class="blank" data-w="' + hit.hole.replace(/"/g,'&quot;') + '">______</span>' + punct;
+    }
+    return wd;
+  }).join(' ');
+  html += '</div></div><div class="chips-row" id="cz-chips">';
+  optsAll.forEach(function(o){
+    html += '<button class="word-chip" data-w="' + o.replace(/"/g,'&quot;') + '">' + o + '</button>';
+  });
+  html += '</div>' + showZh('Tap the word to fill each blank.') + wordHelp(g.passage) + hintBox(g.hint);
+  stage.innerHTML = html;
+  /* 当前空高亮 */
+  var firstBlank = stage.querySelector('.blank');
+  if(firstBlank) firstBlank.classList.add('cur');
+  G.curSay = '';
+  var chips = document.getElementById('cz-chips');
+  chips.onclick = function(e){
+    var t = e.target.closest('.word-chip'); if(!t || G.cz.lock) return;
+    var w = t.getAttribute('data-w');
+    var cur = g.blanks[G.cz.i];
+    if(w === cur.hole){
+      G.cz.lock = true;
+      t.classList.add('correct');
+      var bl = stage.querySelector('.blank[data-w="' + cur.hole.replace(/"/g,'&quot;') + '"]');
+      if(bl){ bl.textContent = cur.hole; bl.classList.remove('cur'); bl.classList.add('filled'); }
+      fb('Great! ' + cur.full, true);
+      sayThen(cur.full, function(){
+        G.cz.i++; G.cz.lock = false;
+        var nb = stage.querySelectorAll('.blank.cur');
+        if(!nb.length){
+          var nextB = stage.querySelector('.blank:not(.filled)');
+          if(nextB) nextB.classList.add('cur');
+        }
+        if(G.cz.i >= g.blanks.length){ setTimeout(finishGame, 400); }
+      }, 5000);
+    } else {
+      var isHole = g.blanks.some(function(b){ return b.hole === w; });
+      t.classList.add('wrong');
+      fb(isHole ? 'Not this blank. Fill the first blank.' : 'Not in this passage.', false);
+      setTimeout(function(){ t.classList.remove('wrong'); }, 600);
+    }
+  };
+};
+
+/* ---- Runner: essay（小作文拼装坊：逐句选句组成一篇过去时小作文，新六上玩法） ---- */
+RUNNERS.essay = function(stage, g){
+  var s = g.stories[G.round];
+  G.essayStep = 0; G.essayPick = [];
+  stage.innerHTML =
+    '<div class="prompt-card">📝 <b>' + s.title + '</b>' +
+    (s.zh ? ' <span class="zh-hint">' + s.zh + '</span>' : '') +
+    '<div style="margin-top:6px;color:#68799a;font-size:14px;">每个空有 3 个句子，只有一个能放进作文（小心时态陷阱！）。一句一句选，把作文写完整！</div></div>' +
+    '<div class="passage" id="essay-paper"></div>' +
+    '<div class="opts opts-1col" id="essay-opts"></div>';
+  paintEssay();
+  function saySeq(lines, done){
+    var i = 0;
+    function step(){
+      if(i >= lines.length){ if(done) done(); return; }
+      say(lines[i], function(){ i++; setTimeout(step, 280); });
+    }
+    step();
+  }
+  G.essayRead = function(){
+    var btn = document.getElementById('essay-read');
+    if(btn) btn.disabled = true;
+    saySeq(G.essayPick, function(){
+      var b2 = document.getElementById('essay-read');
+      if(b2) b2.disabled = false;
+    });
+  };
+  G.essayNext = function(){ nextRound(); };
+  function paintEssay(){
+    var paper = document.getElementById('essay-paper');
+    if(!paper) return;
+    G.lock = false;   /* 每句选完后要解锁，否则第二句起点击全部无效 */
+    var h = '';
+    if(G.essayStep === 0) h += '<div style="color:#a7b3c9;">（作文纸还是空白的，挑句子把它写出来吧）</div>';
+    for(var i = 0; i < G.essayStep; i++) h += '<div>' + G.essayPick[i] + '</div>';
+    paper.innerHTML = h;
+    var box = document.getElementById('essay-opts');
+    if(G.essayStep >= s.steps.length){
+      var last = G.round >= g.stories.length - 1;
+      box.innerHTML =
+        '<button class="big-btn orange" id="essay-read" onclick="G.essayRead()">🔊 Read my essay</button> ' +
+        '<button class="big-btn green" onclick="G.essayNext()">' + (last ? '✅ 写完啦！' : '✍️ 写下一篇') + '</button>';
+      fb('作文写完啦！Read my essay 听听自己的作品 🎉', true);
+      return;
+    }
+    var st = s.steps[G.essayStep];
+    var all = [st.say, st.bad[0].t, st.bad[1].t];
+    var order = shuffle([0, 1, 2]);
+    G.testRight = order.indexOf(0);   /* 自动化测试钩子 */
+    var h2 = '';
+    order.forEach(function(_, pos){
+      h2 += '<button class="opt" data-i="' + pos + '">' + all[order[pos]] + '</button>';
+    });
+    box.innerHTML = h2;
+    box.onclick = function(e){
+      if(G.lock) return;
+      var t = e.target.closest('.opt'); if(!t) return;
+      var pos = +t.getAttribute('data-i');
+      if(pos === G.testRight){
+        G.lock = true;
+        t.classList.add('correct');
+        G.essayPick.push(st.say);
+        G.essayStep++;
+        fb(['Great sentence! 🎉','Nice writing! 🌟','Perfect! 💪'][Math.floor(Math.random()*3)], true);
+        say(st.say);
+        setTimeout(paintEssay, 950);
+      } else {
+        t.classList.add('wrong');
+        fb(pos === order.indexOf(1) ? st.bad[0].why : st.bad[1].why, false);
+        setTimeout(function(){ t.classList.remove('wrong'); }, 800);
+      }
+    };
+  }
+};
+
+/* ---- Runner: judge（听读判一判） ---- */
+RUNNERS.judge = function(stage, g){
+  var pas = PASSAGES[g.passage];
+  var it = g.items[G.round];
+  G.lock = false;
+  stage.innerHTML = passageBox(g.passage) +
+    '<div class="goal" style="text-align:center;font-size:16px;margin-top:10px;">True or false?</div>' +
+    '<div style="background:#f7fbff;border-radius:14px;padding:12px;font-size:18px;font-weight:bold;color:var(--deep);text-align:center;">' +
+    it.say + '</div>' +
+    '<div class="judge-row">' +
+    '<button class="judge-btn judge-yes" data-ok="1">YES</button>' +
+    '<button class="judge-btn judge-no" data-ok="0">NO</button></div>' +
+    hintBox(it.hint);
+  G.curSay = '';   /* 阅读判断题不朗读题目，请孩子自己读 */
+  stage.querySelector('.judge-row').onclick = function(e){
+    var t = e.target.closest('.judge-btn'); if(!t || G.lock) return;
+    var ok = t.getAttribute('data-ok') === '1';
+    G.lock = true;
+    if(ok === it.ok){
+      fb('Great! That is right!', true);
+      party(10);
+      setTimeout(nextRound, 1100);
+    } else {
+      fb(it.ok ? 'Listen to the passage again.' : 'This is not in the passage.', false);
+      G.lock = false;
+    }
+  };
+};
+
+/* ---- Runner: odd（谁是卧底） ---- */
+RUNNERS.odd = function(stage, g){
+  var r = g.rounds[G.round];
+  G.lock = false;
+  var html = '<div class="odd-line" id="odd-line">';
+  r.words.forEach(function(wd, i){
+    html += '<button class="odd-w" data-i="' + i + '">' + wd + '</button>';
+  });
+  html += '</div>' + showZh(r.zh) +
+    '<div class="word-hint">点出句子里不该出现的"卧底"单词！</div>';
+  stage.innerHTML = html;
+  G.curSay = '';   /* 不朗读含错误单词的句子，避免听到错音 */
+  document.getElementById('odd-line').onclick = function(e){
+    var t = e.target.closest('.odd-w'); if(!t || G.lock) return;
+    var i = +t.getAttribute('data-i');
+    if(i === r.bad){
+      G.lock = true;
+      t.classList.add('ok');
+      t.textContent = r.right;
+      fb('抓到卧底！应该是 ' + r.right, true);
+      sayThen(r.full, function(){
+        nextRound();
+      }, 4000);
+    } else {
+      t.classList.add('bad');
+      fb('这个单词没毛病哦，再找找～', false);
+      setTimeout(function(){ t.classList.remove('bad'); }, 600);
+    }
+  };
+};
+
+/* ---- Runner: sort（语法分类基地，支持 2-4 个基地） ---- */
+RUNNERS.sort = function(stage, g){
+  var it = g.items[G.round];
+  G.lock = false;
+  G.sortSel = null;
+  var html = '<div class="word-hint">点单词，再点它该去的基地！</div>' +
+    '<div style="text-align:center;margin:8px 0;"><button class="word-chip" id="sort-chip" style="font-size:20px;padding:14px 22px;line-height:1.5;max-width:100%;">' +
+    it.t + '</button>' + showZh(it.zh) + '</div>' +
+    '<div class="bins" style="grid-template-columns:repeat(2,minmax(0,1fr));">';
+  g.bins.forEach(function(bn, bi){
+    html += '<div class="bin" data-b="' + bi + '" style="min-width:0;max-width:100%;"><h4 style="font-size:14px;overflow-wrap:anywhere;">📦 ' + bn + '</h4><div class="held" id="bin-' + bi + '"></div></div>';
+  });
+  html += '</div>';
+  stage.innerHTML = html;
+  G.curSay = it.t;
+  var chip = document.getElementById('sort-chip');
+  var bins = stage.querySelectorAll('.bin');
+  chip.onclick = function(){ chip.classList.toggle('sel'); };
+  bins.forEach(function(bin){
+    bin.onclick = function(){
+      if(G.lock) return;
+      if(!chip.classList.contains('sel')){ fb('先点上面的单词哦～', false); return; }
+      G.lock = true;
+      var to = +bin.getAttribute('data-b');
+      if(to === it.b){
+        var mc = document.createElement('span');
+        mc.className = 'mini-chip'; mc.textContent = it.t;
+        document.getElementById('bin-' + to).appendChild(mc);
+        chip.style.visibility = 'hidden';
+        fb('归位成功！', true);
+        sayThen(it.t, function(){ G.lock = false; nextRound(); }, 3000);
+      } else {
+        bin.classList.add('hot');
+        fb('这个基地不对哦～', false);
+        setTimeout(function(){ bin.classList.remove('hot'); G.lock = false; }, 650);
+      }
+    };
+  });
+  setTimeout(function(){ resay(); }, 400);
+};
+
+/* ---- Runner: scene（情景喊麦王） ---- */
+RUNNERS.scene = function(stage, g){
+  var sc = g.scenes[G.round];
+  G.st = {sc:sc, step:0, lock:false};
+  stage.innerHTML = '<div class="set-tag">' + sc.em + ' 情景 ' + (G.round+1) + '/' + g.scenes.length + ' · ' + sc.title + '</div>' +
+    '<div id="scene-box"></div>';
+  renderSceneStep();
+};
+function renderSceneStep(){
+  var box = document.getElementById('scene-box');
+  var st = G.st, sp = st.sc.steps[st.step];
+  st.lock = false;
+  var html = '<div class="dialogue"><div class="who">' + sp.npc + '</div>' +
+    '<div class="bubble">🔊 ' + sp.say + '</div></div>' +
+    '<div class="scene-choices" id="sc-choices">';
+  sp.opts.forEach(function(o, i){
+    html += '<button class="scene-btn" data-i="' + i + '">' + o.t + '</button>';
+  });
+  html += '</div><div class="feedback" id="scene-fb"></div>' +
+    '<button class="say-btn" id="scene-repeat" style="display:none;" onclick="say(G.st.sc.steps[G.st.step].say)">🎤 大声跟读这句</button>';
+  box.innerHTML = html;
+  G.curSay = sp.say;
+  setTimeout(function(){ say(sp.say); }, 350);
+  document.getElementById('sc-choices').onclick = function(e){
+    var t = e.target.closest('.scene-btn'); if(!t || st.lock) return;
+    var o = sp.opts[+t.getAttribute('data-i')];
+    var fbEl = document.getElementById('scene-fb');
+    if(o.ok){
+      st.lock = true;
+      t.classList.add('correct');
+      fbEl.textContent = o.why; fbEl.className = 'feedback fb-good';
+      var rep = document.getElementById('scene-repeat');
+      rep.style.display = 'block';
+      sayThen(o.t, function(){
+        st.step++;
+        if(st.step >= st.sc.steps.length){
+          fbEl.textContent = '情景表演完成！👏';
+          setTimeout(nextRound, 1000);
+        } else { renderSceneStep(); }
+      }, 6000);
+    } else {
+      t.classList.add('wrong');
+      fbEl.textContent = o.why; fbEl.className = 'feedback fb-bad';
+      setTimeout(function(){ t.classList.remove('wrong'); }, 700);
+    }
+  };
+}
+
+/* ---- Runner: clue（单词侦探：英文线索一条条给，读懂了才猜得出） ---- */
+RUNNERS.clue = function(stage, g){
+  var it = g.items[G.round];
+  var shown = 1;
+  G.lock = false;
+  var opts = shuffle(it.opts.slice());
+  var html = '<div class="word-hint">🧭 读英文线索，猜出这个单词（线索用得越少越厉害！）</div>' +
+    '<div class="clue-list" id="clue-list"></div>' +
+    '<div class="opts opts-1col" id="clue-opts">';
+  opts.forEach(function(o){
+    html += '<button class="opt clue-opt" data-w="' + o.replace(/"/g,'&quot;') + '">' + o + '</button>';
+  });
+  html += '</div><div style="text-align:center;margin-top:10px;">' +
+    '<button class="odd-w" id="more-clue" onclick="G.moreClue()">💡 再给一条线索</button></div>';
+  stage.innerHTML = html;
+  G.curSay = '';
+  function paint(){
+    var list = document.getElementById('clue-list');
+    var h = '';
+    for (var i = 0; i < shown && i < it.clues.length; i++){
+      h += '<div class="clue-item"><b>Clue ' + (i + 1) + '.</b> ' + it.clues[i] +
+        ' <button class="odd-w" style="font-size:14px;padding:7px 12px;min-height:34px;margin-left:6px;" onclick="say(' + "'" + esc(it.clues[i]) + "'" + ')">🔊</button></div>';
+    }
+    list.innerHTML = h;
+    var btn = document.getElementById('more-clue');
+    if (btn && shown >= it.clues.length) btn.style.display = 'none';
+  }
+  paint();
+  G.moreClue = function(){ if (shown < it.clues.length){ shown++; paint(); } };
+  document.getElementById('clue-opts').onclick = function(e){
+    var t = e.target.closest('.clue-opt'); if (!t || G.lock) return;
+    var w = t.getAttribute('data-w');
+    if (w === it.w){
+      G.lock = true;
+      t.classList.add('correct');
+      var used = shown;
+      fb(used <= 1 ? 'Perfect! 一条线索就猜中！⭐⭐⭐' : (used === 2 ? 'Great! 两条线索猜到 ⭐⭐' : 'Good! 三条线索猜到 ⭐'), true);
+      sayThen(it.w, function(){ nextRound(); }, 2400);
+    } else {
+      t.classList.add('wrong');
+      if (shown < it.clues.length){ shown++; paint(); fb('不是这个，再给你一条线索～', false); }
+      else { fb('再读读线索，想想它的意思～', false); }
+      setTimeout(function(){ t.classList.remove('wrong'); }, 700);
+    }
+  };
+  setTimeout(function(){ say(it.clues[0]); }, 400);
+};
+
+/* ---- Runner: anagram（字母重组：不给空位提示，自己拼整词） ---- */
+RUNNERS.anagram = function(stage, g){
+  var it = g.items[G.round];
+  var letters = it.w.split('');
+  var pool = shuffle(letters.concat(it.extra || []));
+  var wObj = WORDS.filter(function(x){ return x.w === it.w; })[0];
+  G.ana = {i: 0};
+  G.lock = false;
+  var slots = '';
+  letters.forEach(function(_, i){ slots += '<span data-h="' + i + '"></span>'; });
+  var html = '<div style="font-size:52px;text-align:center;">' + (wObj ? wObj.em : '⭐') + '</div>' +
+    '<div class="drop-word drop-slots" id="drop-word">' + slots + '</div>' +
+    showZh((wObj ? wObj.zh : '') + '（' + it.w.length + ' 个字母，按顺序拼出来）') +
+    '<div class="drop-letters" id="drop-letters">';
+  pool.forEach(function(ch){
+    html += '<button class="drop-lb" data-ch="' + ch + '">' + ch + '</button>';
+  });
+  html += '</div>';
+  stage.innerHTML = html;
+  G.curSay = '';
+  document.getElementById('drop-letters').onclick = function(e){
+    var t = e.target.closest('.drop-lb'); if (!t || G.lock) return;
+    if (t.classList.contains('used')) return;
+    var ch = t.getAttribute('data-ch');
+    var need = it.w[G.ana.i];
+    if (ch === need){
+      t.classList.add('used');
+      var sp = document.querySelector('#drop-word span[data-h="' + G.ana.i + '"]');
+      if (sp){ sp.textContent = ch; sp.classList.add('filled'); }
+      G.ana.i++;
+      if (G.ana.i >= it.w.length){
+        G.lock = true;
+        fb('Perfect! ' + it.w + '！', true);
+        sayThen(it.w, function(){ nextRound(); }, 3000);
+      }
+    } else {
+      t.classList.add('bad');
+      fb('第 ' + (G.ana.i + 1) + ' 个字母不是它哦～', false);
+      setTimeout(function(){ t.classList.remove('bad'); }, 450);
+    }
+  };
+};
+
+/* ================= 奖状 & 自检 ================= */
+function goCert(){
+  go('sc-cert');
+  var inp = document.getElementById('cert-name');
+  try{ var n = localStorage.getItem('g4u2name'); if(n && inp) inp.value = n; }catch(e){}
+  var done = totalDone();
+  var note = document.getElementById('cert-note');
+  if(note){
+    note.textContent = done >= TOTAL_STARS ? ('全部 ' + TOTAL_STARS + ' 关通关，奖励 ⭐×' + TOTAL_STARS + '！') :
+      ('已通关 ' + done + '/' + TOTAL_STARS + ' 关，继续加油！');
+  }
+}
+if(document.getElementById('cert-name')){
+  document.getElementById('cert-name').addEventListener('input', function(){
+    var v = this.value.replace(/\s+/g, ' ').slice(0, 12);
+    try{ localStorage.setItem('g4u2name', v); }catch(e){}
+  });
+}
+function startAudit(){
+  var list = document.getElementById('audit-list');
+  var h = '';
+  SAY_ALL.forEach(function(t){
+    h += '<button class="audit-item" onclick="say(\'' + esc(t) + '\')">' + t + '</button>';
+  });
+  list.innerHTML = h;
+  go('sc-audit');
+}
+
+/* ================= 启动 ================= */
+window.__audioMiss = [];
+renderHome();
+(function(){
+  var seen = false;
+  try{ seen = !!localStorage.getItem('g4u2wx3'); }catch(e){}
+  go(seen ? (kidName() ? 'sc-home' : 'sc-name') : 'sc-wx');
+})();
+
 </script>
 <!-- wxtip:v1 -->
 <div id="wxtip-bar" style="display:none;position:fixed;left:0;right:0;top:0;z-index:99999;
